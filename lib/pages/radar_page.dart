@@ -53,40 +53,72 @@ class _RadarScreenState extends State<RadarScreen> {
   Future<void> joinTopic() async {
     var geohash = getGeohash();
     var currentTopic = 'geohash:$geohash';
-    currentChannel = _socket!.addChannel(topic: currentTopic, parameters: {'lat': latController.text, 'long': longController.text});
-    currentChannel!.join().future.then((_) {
-      setState(() {
-        _isConnected = true;
-        _status = "Connected to $currentTopic";
-      });
-    }).catchError((error) {
-      setState(() {
-        _status = "Failed to join: $error";
-      });
+
+    if (_socket == null) {
+      print("❌ Socket is not initialized.");
+      return;
+    }
+
+    print("🔄 Attempting to join topic: $currentTopic");
+
+    _socket!.closeStream.listen((event) {
+      print("⚠️ Socket closed.");
+      setState(() => _isConnected = false);
     });
 
-    currentChannel!.messages.listen((message) {
-      switch (message.event.value) {
-        // case 'switch_topic':
-        //   _joinGeohashChannel(message.payload!['new_topic']);
-        //   break;
-        case 'update_location':
-          setState(() {
-            _status = "User ${message.payload!['user_id']} at: (${message.payload!['lat']}, ${message.payload!['lng']})";
-          });
-          break;
-        case 'user_disconnected':
-          setState(() {
-            _status = "User ${message.payload!['user_id']} disconnected";
-          });
-          break;
+    _socket!.openStream.listen((event) async {
+      print("✅ Socket opened.");
+      
+      currentChannel = _socket!.addChannel(
+        topic: currentTopic,
+        parameters: {
+          'lat': latController.text,
+          'lng': longController.text,
+        },
+      );
+
+      if (currentChannel == null) {
+        print("❌ Failed to create channel.");
+        return;
+      }
+
+      try {
+        await currentChannel!.join().future;
+        print("✅ Successfully joined channel: $currentTopic");
+
+        setState(() {
+          _status = "Connected to $currentTopic";
+          _isConnected = true;
+        });
+
+        currentChannel?.messages.listen((message) {
+          if (message.payload == null) return;
+
+          print("📩 Received event: ${message.event.value}, Payload: ${message.payload}");
+
+          switch (message.event.value) {
+            case 'update_location':
+              setState(() {
+                _status = "User ${message.payload!['user_id']} at: (${message.payload!['lat']}, ${message.payload!['lng']})";
+              });
+              break;
+            case 'user_disconnected':
+              setState(() {
+                _status = "User ${message.payload!['user_id']} disconnected";
+              });
+              break;
+          }
+        });
+      } catch (e) {
+        print("❌ Error joining channel: $e");
       }
     });
   }
 
+
   Future<void> sendLoc() async{
     try{
-      currentChannel!.push('update_location', {'lat': latController.text, 'long': longController.text});
+      currentChannel!.push('update_location', {'lat': double.parse(latController.text), 'lng': double.parse(longController.text)});
       setState(() {
         _status = "Pushed update location";
       });
@@ -97,8 +129,17 @@ class _RadarScreenState extends State<RadarScreen> {
 
   Future<void> _connectWebSocket() async {
     try {
-      _socket = PhoenixSocket('ws://10.0.0.2:4001/socket/websocket?token=${widget.authToken}');
+      _socket = PhoenixSocket('ws://10.0.2.2:4000/socket/websocket?token=${widget.authToken}');
       await _socket!.connect();
+
+      _socket!.closeStream.listen((event) {
+        setState(() => _isConnected = false);
+      });
+      _socket!.openStream.listen((event) {
+        setState(() {
+          _isConnected = true;
+        });
+      });
       
       // var uuid = Uuid().v4();
       // _channel!.push('ping', {'from': uuid});
@@ -115,10 +156,6 @@ class _RadarScreenState extends State<RadarScreen> {
       //   }
       // });
       
-      setState(() {
-        _isConnected = true;
-        _status = "Connected";
-      });
     } catch (e) {
       setState(() {
         _status = "Connection failed: $e";
