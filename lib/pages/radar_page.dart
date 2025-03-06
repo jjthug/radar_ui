@@ -50,9 +50,27 @@ class _RadarScreenState extends State<RadarScreen> {
     }
   }
 
+  // ✅ Function to disconnect from a topic
+  Future<void> disconnectFromTopic() async {
+    if (currentChannel != null) {
+      final leave = currentChannel!.leave();
+
+      final response = await leave.future;
+      print("Resp: $response");
+
+
+      // Optionally, remove the channel from the socket
+      _socket!.removeChannel(currentChannel!);
+    }
+  }
+
   Future<void> joinTopic() async {
     var geohash = getGeohash();
     var currentTopic = 'geohash:$geohash';
+
+    if (currentChannel != null) {
+      disconnectFromTopic();
+    }
 
     if (_socket == null) {
       print("❌ Socket is not initialized.");
@@ -116,16 +134,52 @@ class _RadarScreenState extends State<RadarScreen> {
   }
 
 
-  Future<void> sendLoc() async{
-    try{
-      currentChannel!.push('update_location', {'lat': double.parse(latController.text), 'lng': double.parse(longController.text)});
-      setState(() {
-        _status = "Pushed update location";
-      });
-    }catch (e){
-      print("error occurred");
+  Future<void> sendLoc() async {
+    try {
+      if (currentChannel == null) {
+        print("❌ Channel is not initialized.");
+        return;
+      }
+
+      print("📤 Sending location update...");
+
+      if (_socket == null || !_isConnected || currentChannel == null) {
+        print("❌ WebSocket or Channel is not connected. Cannot update location.");
+        return;
+}
+
+      final push = currentChannel!.push(
+        'update_location',
+        {
+          'lat': double.parse(latController.text),
+          'lng': double.parse(longController.text),
+        },
+      );
+
+      // Wait for the server response
+      final response = await push.future;
+
+      print("✅ Server Response: $response");
+
+      if (mounted) {
+        setState(() {
+          _status = "Server response: ${response.toString()}"; // Ensure UI updates
+        });
+      }
+
+    } catch (e) {
+      print("❌ Error occurred: $e");
+
+      if (mounted) {
+        setState(() {
+          _status = "Error: $e";
+        });
+      }
     }
   }
+
+
+
 
   Future<void> _connectWebSocket() async {
     try {
